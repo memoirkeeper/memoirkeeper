@@ -1,0 +1,55 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const clientId = urlParams.get('id'); 
+        if (!clientId) {
+          alert("Error: No client ID found in the link.");
+          return;
+        }
+
+       
+        const scene = document.querySelector('a-scene');
+        scene.setAttribute('mindar-image', `imageTargetSrc: clients/${clientId}/target.mind;`);
+
+      
+        document.querySelector('#video1').src = `clients/${clientId}/video1.mp4`;
+        document.querySelector('#video2').src = `clients/${clientId}/video2.mp4`;
+      });
+
+ 
+      AFRAME.registerComponent('ar-video-handler', {
+        init: function () {
+          const target = this.el;
+          const video = document.querySelector("#" + this.data.videoID);
+          target.addEventListener("targetFound", () => video.play());
+          target.addEventListener("targetLost", () => video.pause());
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+      <a-assets>
+        <video id="video1" crossorigin="anonymous" loop></video>
+        <video id="video2" crossorigin="anonymous" loop></video>
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <!-- Target Index 0 plays video1 when scanned -->
+      <a-entity mindar-image-target="targetIndex: 0" ar-video-handler="videoID: video1">
+        <a-video src="#video1" position="0 0 0" width="1" height="0.56"></a-video>
+      </a-entity>
+
+      <!-- Target Index 1 plays video2 when scanned -->
+      <a-entity mindar-image-target="targetIndex: 1" ar-video-handler="videoID: video2">
+        <a-video src="#video2" position="0 0 0" width="1" height="0.56"></a-video>
+      </a-entity>
+    </a-scene>
+  </body>
+</html>
