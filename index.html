@@ -1,55 +1,162 @@
+<!DOCTYPE html>
 <html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
-    <script>
-      window.addEventListener('DOMContentLoaded', () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const clientId = urlParams.get('id'); 
-        if (!clientId) {
-          alert("Error: No client ID found in the link.");
-          return;
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keeper - Keep your Memories with Keeper</title>
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+  
+  <style>
+    /* Styling for the UI Overlay */
+    #ui-overlay {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      text-align: center;
+      width: 90%;
+    }
+    .fallback-btn {
+      background: rgba(45, 36, 30, 0.85); /* Sepia Ink theme */
+      color: #F5F2E9; /* Antique Parchment */
+      border: 1px solid #E5A385;
+      padding: 12px 20px;
+      border-radius: 25px;
+      font-family: sans-serif;
+      font-size: 14px;
+      cursor: pointer;
+      display: none; /* Shown if tracking takes too long */
+    }
+    /* Simple Video Modal */
+    #fallback-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.9);
+      z-index: 10000;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #fallback-modal video { width: 90%; max-width: 500px; border-radius: 8px; }
+    .close-btn { color: white; margin-top: 15px; font-size: 16px; cursor: pointer; }
+  </style>
+</head>
+<body style="margin: 0; overflow: hidden;">
+
+  <!-- UI Overlay for User Guidance & Fallback -->
+  <div id="ui-overlay">
+    <button id="fallbackBtn" class="fallback-btn">Having trouble scanning? Click to view videos directly</button>
+  </div>
+
+  <!-- Fallback Video Viewer Modal -->
+  <div id="fallback-modal">
+    <p style="color: #F5F2E9; font-family: sans-serif;">Select Video to Play:</p>
+    <div id="videoContainer"></div>
+    <span class="close-btn" onclick="closeFallbackModal()">✕ Close</span>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const clientId = urlParams.get('id');
+
+      if (!clientId) {
+        alert("Error: Invalid Memory Link.");
+        return;
+      }
+
+      const storageBucket = "keeper-ar-storage.firebasestorage.app";
+      const storageBaseUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o`;
+      const getFirebaseUrl = (path) => `${storageBaseUrl}/${encodeURIComponent(path)}?alt=media`;
+
+      try {
+        const configResponse = await fetch(getFirebaseUrl(`clients/${clientId}/config.json`));
+        const config = await configResponse.json();
+        const totalTargets = config.totalTargets;
+
+        let assetsHTML = '';
+        let entitiesHTML = '';
+
+        for (let i = 0; i < totalTargets; i++) {
+          const videoUrl = getFirebaseUrl(`clients/${clientId}/video${i}.mp4`);
+          assetsHTML += `<video id="video${i}" response-type="arraybuffer" crossorigin="anonymous" preload="auto" playsinline webkit-playsinline src="${videoUrl}"></video>`;
+          entitiesHTML += `
+            <a-entity id="target${i}" mindar-image-target="targetIndex: ${i}">
+              <a-video src="#video${i}" position="0 0 0" width="1" height="1.77"></a-video>
+            </a-entity>
+          `;
         }
 
-       
-        const scene = document.querySelector('a-scene');
-        scene.setAttribute('mindar-image', `imageTargetSrc: clients/${clientId}/target.mind;`);
+        const targetsMindUrl = getFirebaseUrl(`clients/${clientId}/targets.mind`);
 
+        document.body.insertAdjacentHTML('beforeend', `
+          <a-scene 
+            mindar-image="imageTargetSrc: ${targetsMindUrl}; maxTrack: ${totalTargets};" 
+            color-space="sRGB" 
+            renderer="colorManagement: true, physicallyCorrectLights: true" 
+            vr-mode-ui="enabled: false" 
+            device-orientation-permission-ui="enabled: false">
+            <a-assets>${assetsHTML}</a-assets>
+            <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+            ${entitiesHTML}
+          </a-scene>
+        `);
+
+        // Attach target tracking listeners
+        setTimeout(() => {
+          for (let i = 0; i < totalTargets; i++) {
+            const targetEl = document.querySelector(`#target${i}`);
+            const videoEl = document.querySelector(`#video${i}`);
+
+            targetEl.addEventListener("targetFound", () => {
+              videoEl.muted = false;
+              videoEl.play().catch(err => console.log("Autoplay blocked"));
+            });
+
+            targetEl.addEventListener("targetLost", () => {
+              videoEl.pause();
+              videoEl.currentTime = 0;
+            });
+          }
+        }, 500);
+
+        // Show Fallback Button after 6 seconds of scanning without a match
+        const fallbackBtn = document.querySelector('#fallbackBtn');
+        setTimeout(() => {
+          fallbackBtn.style.display = 'inline-block';
+        }, 6000);
+
+        fallbackBtn.addEventListener('click', () => {
+          openFallbackModal(totalTargets, clientId, getFirebaseUrl);
+        });
+
+      } catch (error) {
+        console.error("Failed to load assets:", error);
+        alert("Unable to load AR files. Switching to fallback viewer.");
+      }
+    });
+
+    function openFallbackModal(totalTargets, clientId, getFirebaseUrl) {
+      const container = document.querySelector('#videoContainer');
+      container.innerHTML = '';
       
-        document.querySelector('#video1').src = `clients/${clientId}/video1.mp4`;
-        document.querySelector('#video2').src = `clients/${clientId}/video2.mp4`;
-      });
+      for (let i = 0; i < totalTargets; i++) {
+        const videoUrl = getFirebaseUrl(`clients/${clientId}/video${i}.mp4`);
+        container.innerHTML += `
+          <div style="margin-bottom: 15px;">
+            <p style="color:#fff; margin:5px 0;">Memory #${i + 1}</p>
+            <video controls src="${videoUrl}" style="width:100%;"></video>
+          </div>
+        `;
+      }
+      document.querySelector('#fallback-modal').style.display = 'flex';
+    }
 
- 
-      AFRAME.registerComponent('ar-video-handler', {
-        init: function () {
-          const target = this.el;
-          const video = document.querySelector("#" + this.data.videoID);
-          target.addEventListener("targetFound", () => video.play());
-          target.addEventListener("targetLost", () => video.pause());
-        }
-      });
-    </script>
-  </head>
-  <body>
-    <a-scene color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
-      <a-assets>
-        <video id="video1" crossorigin="anonymous" loop></video>
-        <video id="video2" crossorigin="anonymous" loop></video>
-      </a-assets>
-
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-
-      <!-- Target Index 0 plays video1 when scanned -->
-      <a-entity mindar-image-target="targetIndex: 0" ar-video-handler="videoID: video1">
-        <a-video src="#video1" position="0 0 0" width="1" height="0.56"></a-video>
-      </a-entity>
-
-      <!-- Target Index 1 plays video2 when scanned -->
-      <a-entity mindar-image-target="targetIndex: 1" ar-video-handler="videoID: video2">
-        <a-video src="#video2" position="0 0 0" width="1" height="0.56"></a-video>
-      </a-entity>
-    </a-scene>
-  </body>
+    function closeFallbackModal() {
+      document.querySelector('#fallback-modal').style.display = 'none';
+    }
+  </script>
+</body>
 </html>
