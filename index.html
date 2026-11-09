@@ -60,8 +60,8 @@
   <script>
     window.addEventListener('DOMContentLoaded', async () => {
       const urlParams = new URLSearchParams(window.location.search);
-      const clientId = urlParams.get('id');
-
+      const clientId = urlParams.get('id'); || 'test-001';
+     
       if (!clientId) {
         alert("Error: Invalid Memory Link.");
         return;
