@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Keeper WebAR Scanner</title>
+  <title>Keeper WebAR Multi-Target Scanner</title>
   
   <!-- Include A-Frame (v1.5.0) and MindAR A-Frame Library -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -16,15 +16,14 @@
       background-color: #000;
       font-family: sans-serif;
     }
-    /* Loading or status overlay styles */
     #loading-overlay {
       position: fixed;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: #2D241E; /* Warm Espresso brand aesthetic */
-      color: #F5F2E9; /* Antique Parchment brand aesthetic */
+      background: #2D241E;
+      color: #F5F2E9;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -36,7 +35,7 @@
       width: 50px;
       height: 50px;
       border: 4px solid rgba(245, 242, 233, 0.3);
-      border-top: 4px solid #E5A385; /* Rose Gold accent */
+      border-top: 4px solid #E5A385;
       border-radius: 50%;
       animation: spin 1s linear infinite;
       margin-bottom: 20px;
@@ -49,30 +48,25 @@
 </head>
 <body>
 
-  <!-- Loading Screen Indicator -->
   <div id="loading-overlay">
     <div class="spinner"></div>
-    <div id="loading-text">Loading Experience...</div>
+    <div id="loading-text">Loading Multi-Target Experience...</div>
   </div>
 
   <script>
-    // Configuration Settings
-    // ⚠️ UPDATE THIS to match your exact Firebase Storage bucket name (found in Firebase Console -> Storage)
+    // ⚠️ UPDATE THIS to match your exact Firebase Storage bucket name
     const FIREBASE_BUCKET = "keeper-ar-storage.firebasestorage.app";
 
     async function initializeARScanner() {
       const loadingText = document.getElementById('loading-text');
       
       try {
-        // 1. Extract client ID from URL parameters (e.g. ?client=anna-wedding)
         const urlParams = new URLSearchParams(window.location.search);
-        const clientId = urlParams.get('client') || 'test-001'; // Fallback to test-001 if none provided
+        const clientId = urlParams.get('client') || 'test-001';
         
         loadingText.innerText = `Loading profile for: ${clientId}...`;
 
-        // 2. Fetch the client's config.json from Firebase Storage
         const configUrl = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${clientId}%2Fconfig.json?alt=media`;
-        
         const response = await fetch(configUrl);
         if (!response.ok) {
           throw new Error(`Could not find config.json for client "${clientId}" (Status: ${response.status})`);
@@ -81,17 +75,13 @@
         const config = await response.json();
         console.log("Config loaded successfully:", config);
 
-        // 3. Build the base secure Firebase storage path for this specific client
         const clientFolderPrefix = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${config.clientId}%2F`;
-        
         const mindFileUrl = clientFolderPrefix + "targets.mind?alt=media";
-        const targetVideoFile = config.targets && config.targets[0] ? config.targets[0].videoUrl : "video0.mp4";
-        const videoFileUrl = clientFolderPrefix + targetVideoFile + "?alt=media";
 
-        loadingText.innerText = "Initializing Camera & Tracker...";
+        loadingText.innerText = "Initializing Multi-Target Camera...";
 
-        // 4. Inject the A-Frame Scene dynamically once assets are successfully mapped
-        buildAndInjectScene(mindFileUrl, videoFileUrl);
+        // Build scene dynamically using ALL targets in config.json
+        buildAndInjectMultiScene(mindFileUrl, config.targets, clientFolderPrefix);
 
       } catch (error) {
         console.error("Initialization Error:", error);
@@ -99,13 +89,43 @@
           <div style="text-align: center; padding: 20px;">
             <h3 style="color: #E5A385; margin-bottom: 10px;">Failed to Load Experience</h3>
             <p style="font-size: 14px; max-width: 300px;">${error.message}</p>
-            <p style="font-size: 12px; color: #888; margin-top: 15px;">Please check your internet connection or URL client parameter.</p>
           </div>
         `;
       }
     }
 
-    function buildAndInjectScene(mindFileUrl, videoFileUrl) {
+    function buildAndInjectMultiScene(mindFileUrl, targets, clientFolderPrefix) {
+      // 1. Build assets block dynamically for every video listed in config.json
+      let assetsHTML = '<a-assets>';
+      let entitiesHTML = '';
+
+      targets.forEach((target, index) => {
+        const videoUrl = clientFolderPrefix + target.videoUrl + "?alt=media";
+        
+        // Register each video asset with a unique ID
+        assetsHTML += `
+          <video 
+            id="ar-video-${index}" 
+            src="${videoUrl}" 
+            preload="auto" 
+            response-type="arraybuffer" 
+            crossorigin="anonymous" 
+            playsinline 
+            webkit-playsinline 
+            loop>
+          </video>
+        `;
+
+        // Register each target index (0, 1, 2...) matching your compiled .mind file slots
+        entitiesHTML += `
+          <a-entity mindar-image-target="targetIndex: ${index}" id="target-entity-${index}">
+            <a-video src="#ar-video-${index}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+          </a-entity>
+        `;
+      });
+      assetsHTML += '</a-assets>';
+
+      // 2. Assemble the complete A-Frame scene
       const sceneHTML = `
         <a-scene 
           mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;" 
@@ -114,36 +134,19 @@
           vr-mode-ui="enabled: false" 
           device-orientation-permission-ui="enabled: false">
           
-          <a-assets>
-            <video 
-              id="ar-video" 
-              src="${videoFileUrl}" 
-              preload="auto" 
-              response-type="arraybuffer" 
-              crossorigin="anonymous" 
-              playsinline 
-              webkit-playsinline 
-              loop>
-            </video>
-          </a-assets>
+          ${assetsHTML}
 
           <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-          <!-- Target Index 0 matches the first target in your .mind file -->
-          <a-entity mindar-image-target="targetIndex: 0" id="target-entity">
-            <!-- Adjust width and height dimensions here based on your photo aspect ratio (e.g., width="1" height="1.33" for 3:4 portrait) -->
-            <a-video src="#ar-video" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
-          </a-entity>
+          ${entitiesHTML}
         </a-scene>
       `;
 
-      // Append scene to DOM
       document.body.insertAdjacentHTML('beforeend', sceneHTML);
 
-      // Handle video play/pause behavior on target detection events
+      // 3. Remove loading screen once loaded
       const sceneEl = document.querySelector('a-scene');
       sceneEl.addEventListener('loaded', () => {
-        // Remove loading screen smoothly once A-Frame is fully initialized
         const overlay = document.getElementById('loading-overlay');
         if (overlay) {
           overlay.style.opacity = '0';
@@ -151,21 +154,25 @@
         }
       });
 
-      const targetEntity = document.querySelector('#target-entity');
-      const videoEl = document.querySelector('#ar-video');
+      // 4. Attach play/pause listeners to EACH target dynamically
+      targets.forEach((_, index) => {
+        const targetEntity = document.querySelector(`#target-entity-${index}`);
+        const videoEl = document.querySelector(`#ar-video-${index}`);
 
-      targetEntity.addEventListener('targetFound', () => {
-        console.log("Target found! Playing video.");
-        videoEl.play().catch(e => console.log("Autoplay blocked/errored:", e));
-      });
+        if (targetEntity && videoEl) {
+          targetEntity.addEventListener('targetFound', () => {
+            console.log(`Target ${index} found! Playing video.`);
+            videoEl.play().catch(e => console.log(`Autoplay blocked on target ${index}:`, e));
+          });
 
-      targetEntity.addEventListener('targetLost', () => {
-        console.log("Target lost. Pausing video.");
-        videoEl.pause();
+          targetEntity.addEventListener('targetLost', () => {
+            console.log(`Target ${index} lost. Pausing video.`);
+            videoEl.pause();
+          });
+        }
       });
     }
 
-    // Trigger initialization when page DOM is ready
     window.addEventListener('DOMContentLoaded', initializeARScanner);
   </script>
 </body>
