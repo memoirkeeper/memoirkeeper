@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Keeper WebAR Multi-Target Scanner</title>
+  <title>Local MindAR Multi-Target Test Scanner</title>
   
-  <!-- Include A-Frame (v1.5.0) and MindAR A-Frame Library -->
+  <!-- Include A-Frame and MindAR A-Frame Library -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
   
@@ -15,6 +15,22 @@
       overflow: hidden;
       background-color: #000;
       font-family: sans-serif;
+    }
+    #ui-instruction {
+      position: fixed;
+      bottom: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(45, 36, 30, 0.85);
+      color: #F5F2E9;
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-size: 14px;
+      z-index: 999;
+      pointer-events: none;
+      text-align: center;
+      border: 1px solid rgba(229, 163, 133, 0.3);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
     #loading-overlay {
       position: fixed;
@@ -50,38 +66,63 @@
 
   <div id="loading-overlay">
     <div class="spinner"></div>
-    <div id="loading-text">Loading Multi-Target Experience...</div>
+    <div id="loading-text">Loading Client Memoir...</div>
   </div>
 
+  <div id="ui-instruction">Point your camera at your Keeper photobook page</div>
+
+  <!-- A-Frame Scene pointing to your local multi-target mind file -->
+  <a-scene 
+    id="ar-scene"
+    mindar-image="imageTargetSrc: ; autoStart: false; uiScanning: yes;" 
+    color-space="sRGB" 
+    renderer="colorManagement: true, physicallyCorrectLights" 
+    vr-mode-ui="enabled: false" 
+    device-orientation-permission-ui="enabled: false">
+    
+    <a-assets id="dynamic-assets">
+      <!-- Client video assets populate here -->
+    </a-assets>
+
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+    <div id="dynamic-entities">
+      <!-- Client target entities populate here -->
+    </div>
+  </a-scene>
+
   <script>
-    // ⚠️ UPDATE THIS to match your exact Firebase Storage bucket name
+    // ⚠️ UPDATE THIS to your exact Firebase Storage bucket name
     const FIREBASE_BUCKET = "keeper-ar-storage.firebasestorage.app";
 
-    async function initializeARScanner() {
+    async function initializeClientAR() {
       const loadingText = document.getElementById('loading-text');
-      
+
       try {
+        // Read the client identifier from the URL (e.g., index.html?client=client-001)
         const urlParams = new URLSearchParams(window.location.search);
         const clientId = urlParams.get('client') || 'test-001';
-        
+
         loadingText.innerText = `Loading profile for: ${clientId}...`;
 
+        // Fetch the client's configuration file from Firebase Storage
         const configUrl = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${clientId}%2Fconfig.json?alt=media`;
         const response = await fetch(configUrl);
         if (!response.ok) {
-          throw new Error(`Could not find config.json for client "${clientId}" (Status: ${response.status})`);
+          throw new Error(`Could not find config for client "${clientId}" (Status: ${response.status})`);
         }
-        
-        const config = await response.json();
-        console.log("Config loaded successfully:", config);
 
-        const clientFolderPrefix = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${config.clientId}%2F`;
+        const config = await response.json();
+        console.log("Client config loaded:", config);
+
+        // Define the base folder prefix for this specific client in Firebase Storage
+        const clientFolderPrefix = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${clientId}%2F`;
         const mindFileUrl = clientFolderPrefix + "targets.mind?alt=media";
 
         loadingText.innerText = "Initializing Multi-Target Camera...";
 
-        // Build scene dynamically using ALL targets in config.json
-        buildAndInjectMultiScene(mindFileUrl, config.targets, clientFolderPrefix);
+        // Build assets and target entities dynamically based on config data
+        buildAndPopulateScene(mindFileUrl, config.targets, clientFolderPrefix);
 
       } catch (error) {
         console.error("Initialization Error:", error);
@@ -94,18 +135,22 @@
       }
     }
 
-    function buildAndInjectMultiScene(mindFileUrl, targets, clientFolderPrefix) {
-      // 1. Build assets block dynamically for every video listed in config.json
-      let assetsHTML = '<a-assets>';
+    function buildAndPopulateScene(mindFileUrl, targets, clientFolderPrefix) {
+      const assetsContainer = document.getElementById('dynamic-assets');
+      const entitiesContainer = document.getElementById('dynamic-entities');
+      const sceneEl = document.getElementById('ar-scene');
+      const instruction = document.querySelector('#ui-instruction');
+
+      let assetsHTML = '';
       let entitiesHTML = '';
 
+      // Loop through whatever targets are defined in the client's config.json
       targets.forEach((target, index) => {
-        const videoUrl = clientFolderPrefix + target.videoUrl + "?alt=media";
-        
-        // Register each video asset with a unique ID
+        const videoUrl = clientFolderPrefix + target.videoFileName + "?alt=media";
+
         assetsHTML += `
           <video 
-            id="ar-video-${index}" 
+            id="video-${index}" 
             src="${videoUrl}" 
             preload="auto" 
             response-type="arraybuffer" 
@@ -116,36 +161,20 @@
           </video>
         `;
 
-        // Register each target index (0, 1, 2...) matching your compiled .mind file slots
         entitiesHTML += `
-          <a-entity mindar-image-target="targetIndex: ${index}" id="target-entity-${index}">
-            <a-video src="#ar-video-${index}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+          <a-entity mindar-image-target="targetIndex: ${index}" id="target-${index}">
+            <a-video src="#video-${index}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
           </a-entity>
         `;
       });
-      assetsHTML += '</a-assets>';
 
-      // 2. Assemble the complete A-Frame scene
-      const sceneHTML = `
-        <a-scene 
-          mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;" 
-          color-space="sRGB" 
-          renderer="colorManagement: true, physicallyCorrectLights" 
-          vr-mode-ui="enabled: false" 
-          device-orientation-permission-ui="enabled: false">
-          
-          ${assetsHTML}
+      assetsContainer.innerHTML = assetsHTML;
+      entitiesContainer.innerHTML = entitiesHTML;
 
-          <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      // Update the scene's MindAR attribute with the client's .mind file URL and start
+      sceneEl.setAttribute('mindar-image', `imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;`);
 
-          ${entitiesHTML}
-        </a-scene>
-      `;
-
-      document.body.insertAdjacentHTML('beforeend', sceneHTML);
-
-      // 3. Remove loading screen once loaded
-      const sceneEl = document.querySelector('a-scene');
+      // Hide loading overlay once scene loads
       sceneEl.addEventListener('loaded', () => {
         const overlay = document.getElementById('loading-overlay');
         if (overlay) {
@@ -154,26 +183,29 @@
         }
       });
 
-      // 4. Attach play/pause listeners to EACH target dynamically
+      // Attach tracking event listeners dynamically for each target index
       targets.forEach((_, index) => {
-        const targetEntity = document.querySelector(`#target-entity-${index}`);
-        const videoEl = document.querySelector(`#ar-video-${index}`);
+        const targetEntity = document.querySelector(`#target-${index}`);
+        const videoEl = document.querySelector(`#video-${index}`);
 
         if (targetEntity && videoEl) {
           targetEntity.addEventListener('targetFound', () => {
-            console.log(`Target ${index} found! Playing video.`);
-            videoEl.play().catch(e => console.log(`Autoplay blocked on target ${index}:`, e));
+            console.log(`SUCCESS: Target ${index} recognized! Playing video.`);
+            instruction.innerText = `Memoir ${index + 1} Playing...`;
+            videoEl.play().catch(e => console.log(`Autoplay restriction on target ${index}:`, e));
           });
 
           targetEntity.addEventListener('targetLost', () => {
-            console.log(`Target ${index} lost. Pausing video.`);
+            console.log(`LOST: Target ${index} out of view.`);
+            instruction.innerText = "Point your camera at your Keeper photobook page";
             videoEl.pause();
           });
         }
       });
     }
 
-    window.addEventListener('DOMContentLoaded', initializeARScanner);
+    window.addEventListener('DOMContentLoaded', initializeClientAR);
   </script>
+
 </body>
 </html>
