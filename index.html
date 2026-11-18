@@ -165,7 +165,7 @@
 
         loadingText.innerText = "Initializing Multi-Target Camera...";
 
-        // Hide splash screen and show instruction UI
+        // Hide splash screen and show instruction UI immediately
         document.getElementById('start-screen').style.display = 'none';
         document.getElementById('ui-instruction').style.display = 'block';
 
@@ -217,8 +217,10 @@
       assetsContainer.innerHTML = assetsHTML;
       entitiesContainer.innerHTML = entitiesHTML;
 
-      // Update the MindAR attribute on the pre-existing scene and trigger start
-      sceneEl.setAttribute('mindar-image', `imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;`);
+      // Add a slight delay before triggering MindAR autoStart to let the mobile camera hardware engage safely
+      setTimeout(() => {
+        sceneEl.setAttribute('mindar-image', `imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;`);
+      }, 300);
 
       // Attach play/pause event listeners to each target after DOM injection
       setTimeout(() => {
@@ -232,13 +234,19 @@
           if (targetEntity && videoEl) {
             // Prime video element to initialize WebGL texture buffer
             videoEl.load();
+            videoEl.play().then(() => {
+              videoEl.pause();
+              videoEl.currentTime = 0;
+            }).catch(err => console.log(`Primer play caught:`, err));
 
             targetEntity.addEventListener('targetFound', () => {
               console.log(`Target ${targetIdx} found! Playing video.`);
               instruction.innerText = `Playing memory ${targetIdx + 1}...`;
               
-              videoEl.play().catch(e => {
-                console.log(`Autoplay blocked on target ${targetIdx}, trying muted fallback:`, e);
+              videoEl.play().then(() => {
+                console.log(`Video ${targetIdx} playing successfully.`);
+              }).catch(e => {
+                console.log(`Playback error on target ${targetIdx}, trying muted fallback:`, e);
                 videoEl.muted = true;
                 videoEl.play();
               });
