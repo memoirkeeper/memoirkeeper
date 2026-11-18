@@ -133,20 +133,26 @@
 
     async function startScanner() {
       const loadingText = document.getElementById('loading-text');
-      loadingText.innerText = "Loading memories...";
+      loadingText.innerText = "Loading config...";
       
-      let totalTargets = 5; 
+      let targetsConfig = [];
 
       try {
         const response = await fetch(configUrl);
         if (response.ok) {
           const config = await response.json();
-          if (config.totalTargets) {
-            totalTargets = config.totalTargets;
+          // Read the explicit targets array from the JSON
+          if (config.targets && Array.isArray(config.targets)) {
+            targetsConfig = config.targets;
           }
+        } else {
+          throw new Error("Config file not found");
         }
       } catch (err) {
-        console.log("Could not load config.json, defaulting to 5 targets.", err);
+        console.error("Could not load explicit config.json targets, falling back:", err);
+        alert("Error: Could not load client configuration json from Firebase.");
+        loadingText.innerText = "Error loading config";
+        return;
       }
 
       document.getElementById('start-screen').style.display = 'none';
@@ -157,20 +163,22 @@
       let videoAssetsHtml = '';
       let targetEntitiesHtml = '';
 
-      for (let i = 0; i < totalTargets; i++) {
-        const videoUrl = getFirebaseUrl(`clients/${clientId}/video-${i}.mp4`);
+      // Build elements dynamically based on the explicit array in JSON
+      targetsConfig.forEach((item) => {
+        const targetIdx = item.targetIndex;
+        const videoFilename = item.videoUrl;
+        const videoFileURL = getFirebaseUrl(`clients/${clientId}/${videoFilename}`);
         
-        // Critical mobile video attributes included
         videoAssetsHtml += `
-          <video id="video-${i}" src="${videoUrl}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
+          <video id="video-${targetIdx}" src="${videoFileURL}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
         `;
 
         targetEntitiesHtml += `
-          <a-entity mindar-image-target="targetIndex: ${i}" id="target-${i}">
-            <a-video src="#video-${i}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+          <a-entity mindar-image-target="targetIndex: ${targetIdx}" id="target-${targetIdx}">
+            <a-video src="#video-${targetIdx}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
           </a-entity>
         `;
-      }
+      });
 
       container.innerHTML = `
         <a-scene 
@@ -197,16 +205,17 @@
         alert("Could not start camera. Please ensure camera permissions are allowed.");
       });
 
-      // Attach event listeners and prime the video textures after scene mounts
+      // Attach event listeners and prime video textures after scene mounts
       setTimeout(() => {
         const instruction = document.querySelector('#ui-instruction');
 
-        for (let i = 0; i < totalTargets; i++) {
-          const targetEntity = document.querySelector(`#target-${i}`);
-          const videoEl = document.querySelector(`#video-${i}`);
+        targetsConfig.forEach((item) => {
+          const targetIdx = item.targetIndex;
+          const targetEntity = document.querySelector(`#target-${targetIdx}`);
+          const videoEl = document.querySelector(`#video-${targetIdx}`);
 
           if (targetEntity && videoEl) {
-            // Prime the video element so the WebGL texture cache recognizes it
+            // Prime video element for WebGL texture memory
             videoEl.load();
             videoEl.play().then(() => {
               videoEl.pause();
@@ -214,27 +223,26 @@
             }).catch(err => console.log(`Primer play caught:`, err));
 
             targetEntity.addEventListener('targetFound', () => {
-              console.log(`SUCCESS: Target ${i} recognized for ${clientId}! Playing video.`);
-              instruction.innerText = `Playing memory ${i + 1}...`;
+              console.log(`SUCCESS: Target ${targetIdx} recognized for ${clientId}! Playing video.`);
+              instruction.innerText = `Playing memory ${targetIdx + 1}...`;
               
               videoEl.play().then(() => {
-                console.log(`Video ${i} playing successfully.`);
+                console.log(`Video ${targetIdx} playing successfully.`);
               }).catch(e => {
-                console.log(`Playback error on target ${i}:`, e);
-                // Fallback attempt
+                console.log(`Playback error on target ${targetIdx}:`, e);
                 videoEl.muted = true;
                 videoEl.play();
               });
             });
 
             targetEntity.addEventListener('targetLost', () => {
-              console.log(`LOST: Target ${i} out of view.`);
+              console.log(`LOST: Target ${targetIdx} out of view.`);
               instruction.innerText = "Point your camera at your Keeper prints";
               videoEl.pause();
               videoEl.currentTime = 0;
             });
           }
-        }
+        });
       }, 1500);
     }
   </script>
