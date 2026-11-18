@@ -10,18 +10,33 @@
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
   
   <style>
-    body {
+    /* Force full-screen layout to prevent half-screen black boxes on mobile */
+    html, body {
       margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
       background-color: #000;
       font-family: sans-serif;
+    }
+    #scene-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    a-scene {
+      width: 100% !important;
+      height: 100% !important;
     }
     #ui-instruction {
       position: fixed;
       bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.75);
       color: #fff;
       padding: 12px 24px;
       border-radius: 24px;
@@ -30,7 +45,7 @@
       pointer-events: none;
       text-align: center;
       max-width: 85vw;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     #start-screen {
       position: fixed;
@@ -85,7 +100,6 @@
 </head>
 <body>
 
-  <!-- Splash Screen to unlock mobile audio/video & camera permissions -->
   <div id="start-screen">
     <h1>Keeper Memories</h1>
     <p>Tap below to open your camera and bring your printed photos to life.</p>
@@ -99,7 +113,7 @@
 
   <script>
     const urlParams = new URLSearchParams(window.location.search);
-    const clientId = urlParams.get('client') || 'default-client';
+    const clientId = urlParams.get('client') || 'test-001';
 
     const STORAGE_BUCKET = "keeper-ar-storage.firebasestorage.app";
     
@@ -115,7 +129,7 @@
       const loadingText = document.getElementById('loading-text');
       loadingText.innerText = "Loading memories...";
       
-      let totalTargets = 5; // Fallback default
+      let totalTargets = 5; // Default fallback
 
       try {
         const response = await fetch(configUrl);
@@ -140,8 +154,9 @@
       for (let i = 0; i < totalTargets; i++) {
         const videoUrl = getFirebaseUrl(`clients/${clientId}/video-${i}.mp4`);
         
+        // Removed response-type="arraybuffer" as it can block native video streaming on mobile
         videoAssetsHtml += `
-          <video id="video-${i}" src="${videoUrl}" preload="auto" response-type="arraybuffer" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
+          <video id="video-${i}" src="${videoUrl}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
         `;
 
         targetEntitiesHtml += `
@@ -151,10 +166,9 @@
         `;
       }
 
-      // Note: uiScanning is set to "no" to remove the buggy black box overlay
       container.innerHTML = `
         <a-scene 
-          mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: no;" 
+          mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;" 
           color-space="sRGB" 
           renderer="colorManagement: true, physicallyCorrectLights" 
           vr-mode-ui="enabled: false" 
@@ -170,7 +184,7 @@
         </a-scene>
       `;
 
-      // Attach event listeners and preload video elements once injected
+      // Attach event listeners after scene mounts
       setTimeout(() => {
         const instruction = document.querySelector('#ui-instruction');
 
@@ -179,22 +193,23 @@
           const videoEl = document.querySelector(`#video-${i}`);
 
           if (targetEntity && videoEl) {
-            // Force the video element to load its stream from Firebase
-            videoEl.load();
-
             targetEntity.addEventListener('targetFound', () => {
               console.log(`SUCCESS: Target ${i} recognized for ${clientId}! Playing video.`);
               instruction.innerText = `Playing memory ${i + 1}...`;
               
-              // Reset video to start and play
-              videoEl.currentTime = 0;
-              videoEl.play().catch(e => console.log(`Playback error on target ${i}:`, e));
+              // Ensure video is loaded and play safely
+              videoEl.play().catch(e => {
+                console.log(`Autoplay blocked on target ${i}, trying muted fallback:`, e);
+                videoEl.muted = true;
+                videoEl.play().catch(err => console.log(`Muted play failed:`, err));
+              });
             });
 
             targetEntity.addEventListener('targetLost', () => {
               console.log(`LOST: Target ${i} out of view.`);
               instruction.innerText = "Point your camera at your Keeper prints";
               videoEl.pause();
+              videoEl.currentTime = 0; // Reset video back to start
             });
           }
         }
