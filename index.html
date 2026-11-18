@@ -160,14 +160,14 @@
       for (let i = 0; i < totalTargets; i++) {
         const videoUrl = getFirebaseUrl(`clients/${clientId}/video-${i}.mp4`);
         
-        // Critical mobile video attributes included
+        // Added response-type="arraybuffer" back for robust mobile binary buffering
         videoAssetsHtml += `
-          <video id="video-${i}" src="${videoUrl}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
+          <video id="video-${i}" src="${videoUrl}" preload="auto" response-type="arraybuffer" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
         `;
 
         targetEntitiesHtml += `
           <a-entity mindar-image-target="targetIndex: ${i}" id="target-${i}">
-            <a-video src="#video-${i}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+            <a-video src="#video-${i}" position="0 0 0" width="1" height="1.33" rotation="0 0 0" id="video-plane-${i}"></a-video>
           </a-entity>
         `;
       }
@@ -197,31 +197,33 @@
         alert("Could not start camera. Please ensure camera permissions are allowed.");
       });
 
-      // Attach event listeners and prime the video textures after scene mounts
+      // Attach event listeners and prime video textures after scene mounts
       setTimeout(() => {
         const instruction = document.querySelector('#ui-instruction');
 
         for (let i = 0; i < totalTargets; i++) {
           const targetEntity = document.querySelector(`#target-${i}`);
           const videoEl = document.querySelector(`#video-${i}`);
+          const videoPlaneEl = document.querySelector(`#video-plane-${i}`);
 
           if (targetEntity && videoEl) {
-            // Prime the video element so the WebGL texture cache recognizes it
+            // Prime the video element so the WebGL texture cache recognizes it immediately
             videoEl.load();
-            videoEl.play().then(() => {
-              videoEl.pause();
-              videoEl.currentTime = 0;
-            }).catch(err => console.log(`Primer play caught:`, err));
 
             targetEntity.addEventListener('targetFound', () => {
               console.log(`SUCCESS: Target ${i} recognized for ${clientId}! Playing video.`);
               instruction.innerText = `Playing memory ${i + 1}...`;
               
+              // Ensure video starts from the beginning and forces texture refresh
+              videoEl.currentTime = 0;
               videoEl.play().then(() => {
                 console.log(`Video ${i} playing successfully.`);
+                // Force A-Frame material texture refresh if available
+                if (videoPlaneEl && videoPlaneEl.components.material && videoPlaneEl.components.material.material.map) {
+                  videoPlaneEl.components.material.material.map.needsUpdate = true;
+                }
               }).catch(e => {
                 console.log(`Playback error on target ${i}:`, e);
-                // Fallback attempt
                 videoEl.muted = true;
                 videoEl.play();
               });
