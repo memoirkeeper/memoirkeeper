@@ -160,7 +160,7 @@
       for (let i = 0; i < totalTargets; i++) {
         const videoUrl = getFirebaseUrl(`clients/${clientId}/video-${i}.mp4`);
         
-        // Added webkit-playsinline, playsinline, muted, and autoplay attributes to prevent black screen rendering
+        // Critical mobile video attributes included
         videoAssetsHtml += `
           <video id="video-${i}" src="${videoUrl}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
         `;
@@ -197,7 +197,7 @@
         alert("Could not start camera. Please ensure camera permissions are allowed.");
       });
 
-      // Attach event listeners after scene mounts
+      // Attach event listeners and prime the video textures after scene mounts
       setTimeout(() => {
         const instruction = document.querySelector('#ui-instruction');
 
@@ -206,8 +206,12 @@
           const videoEl = document.querySelector(`#video-${i}`);
 
           if (targetEntity && videoEl) {
-            // Force browser to load video data frame
+            // Prime the video element so the WebGL texture cache recognizes it
             videoEl.load();
+            videoEl.play().then(() => {
+              videoEl.pause();
+              videoEl.currentTime = 0;
+            }).catch(err => console.log(`Primer play caught:`, err));
 
             targetEntity.addEventListener('targetFound', () => {
               console.log(`SUCCESS: Target ${i} recognized for ${clientId}! Playing video.`);
@@ -217,6 +221,9 @@
                 console.log(`Video ${i} playing successfully.`);
               }).catch(e => {
                 console.log(`Playback error on target ${i}:`, e);
+                // Fallback attempt
+                videoEl.muted = true;
+                videoEl.play();
               });
             });
 
