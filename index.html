@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Keeper AR Scanner</title>
   
-  <!-- Include A-Frame and MindAR A-Frame Library -->
+  <!-- Include A-Frame (v1.5.0) and MindAR A-Frame Library -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
   
@@ -106,146 +106,154 @@
 </head>
 <body>
 
+  <!-- User Interaction Splash Screen to Unlock Mobile Autoplay & Camera Permissions -->
   <div id="start-screen">
     <h1>Keeper Memories</h1>
     <p>Tap below to open your camera and bring your printed photos to life.</p>
-    <button id="start-button" onclick="startScanner()">Open AR Scanner</button>
+    <button id="start-button" onclick="startScannerExperience()">Open AR Scanner</button>
     <div id="loading-text">Ready</div>
   </div>
 
   <div id="ui-instruction" style="display: none;">Point your camera at your Keeper prints</div>
 
-  <div id="scene-container"></div>
+  <div id="scene-container">
+    <!-- Static A-Frame Scene initialized with safe placeholder attributes -->
+    <a-scene 
+      id="ar-scene"
+      mindar-image="imageTargetSrc: ; autoStart: false; uiScanning: yes;" 
+      color-space="sRGB" 
+      renderer="colorManagement: true, physicallyCorrectLights" 
+      vr-mode-ui="enabled: false" 
+      device-orientation-permission-ui="enabled: false">
+      
+      <a-assets id="dynamic-assets">
+        <!-- Dynamic videos will populate here -->
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <div id="dynamic-entities">
+        <!-- Dynamic target entities will populate here -->
+      </div>
+    </a-scene>
+  </div>
 
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const clientId = urlParams.get('client') || 'test-001';
+    const FIREBASE_BUCKET = "keeper-ar-storage.firebasestorage.app";
 
-    const STORAGE_BUCKET = "keeper-ar-storage.firebasestorage.app";
-    
-    function getFirebaseUrl(path) {
-      const encodedPath = encodeURIComponent(path);
-      return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodedPath}?alt=media`;
-    }
-
-    const mindFileUrl = getFirebaseUrl(`clients/${clientId}/targets.mind`);
-    const configUrl = getFirebaseUrl(`clients/${clientId}/config.json`);
-
-    async function startScanner() {
+    async function startScannerExperience() {
       const loadingText = document.getElementById('loading-text');
-      loadingText.innerText = "Loading config...";
-      
-      let targetsConfig = [];
+      loadingText.innerText = "Loading client profile...";
 
       try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const clientId = urlParams.get('client') || 'test-001';
+
+        // Fetch config.json using explicit URL format
+        const configUrl = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${clientId}%2Fconfig.json?alt=media`;
         const response = await fetch(configUrl);
-        if (response.ok) {
-          const config = await response.json();
-          // Read the explicit targets array from the JSON
-          if (config.targets && Array.isArray(config.targets)) {
-            targetsConfig = config.targets;
-          }
-        } else {
-          throw new Error("Config file not found");
-        }
-      } catch (err) {
-        console.error("Could not load explicit config.json targets, falling back:", err);
-        alert("Error: Could not load client configuration json from Firebase.");
-        loadingText.innerText = "Error loading config";
-        return;
-      }
-
-      document.getElementById('start-screen').style.display = 'none';
-      document.getElementById('ui-instruction').style.display = 'block';
-
-      const container = document.getElementById('scene-container');
-      
-      let videoAssetsHtml = '';
-      let targetEntitiesHtml = '';
-
-      // Build elements dynamically based on the explicit array in JSON
-      targetsConfig.forEach((item) => {
-        const targetIdx = item.targetIndex;
-        const videoFilename = item.videoUrl;
-        const videoFileURL = getFirebaseUrl(`clients/${clientId}/${videoFilename}`);
         
-        videoAssetsHtml += `
-          <video id="video-${targetIdx}" src="${videoFileURL}" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline muted loop></video>
+        if (!response.ok) {
+          throw new Error(`Could not find config.json for client "${clientId}" (Status: ${response.status})`);
+        }
+        
+        const config = await response.json();
+        console.log("Config loaded successfully:", config);
+
+        const clientFolderPrefix = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${config.clientId}%2F`;
+        const mindFileUrl = clientFolderPrefix + "targets.mind?alt=media";
+
+        loadingText.innerText = "Initializing Multi-Target Camera...";
+
+        // Hide splash screen and show instruction UI
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('ui-instruction').style.display = 'block';
+
+        // Build assets and entities dynamically into the static DOM
+        buildAndPopulateScene(mindFileUrl, config.targets, clientFolderPrefix);
+
+      } catch (error) {
+        console.error("Initialization Error:", error);
+        loadingText.style.color = "#E5A385";
+        loadingText.innerText = `Error: ${error.message}`;
+      }
+    }
+
+    function buildAndPopulateScene(mindFileUrl, targets, clientFolderPrefix) {
+      const assetsContainer = document.getElementById('dynamic-assets');
+      const entitiesContainer = document.getElementById('dynamic-entities');
+      const sceneEl = document.getElementById('ar-scene');
+
+      let assetsHTML = '';
+      let entitiesHTML = '';
+
+      // Loop through the explicit targets array in config.json
+      targets.forEach((target) => {
+        const targetIdx = target.targetIndex;
+        const videoFilename = target.videoUrl;
+        const videoUrl = clientFolderPrefix + videoFilename + "?alt=media";
+        
+        assetsHTML += `
+          <video 
+            id="ar-video-${targetIdx}" 
+            src="${videoUrl}" 
+            preload="auto" 
+            response-type="arraybuffer" 
+            crossorigin="anonymous" 
+            playsinline 
+            webkit-playsinline 
+            muted
+            loop>
+          </video>
         `;
 
-        targetEntitiesHtml += `
-          <a-entity mindar-image-target="targetIndex: ${targetIdx}" id="target-${targetIdx}">
-            <a-video src="#video-${targetIdx}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+        entitiesHTML += `
+          <a-entity mindar-image-target="targetIndex: ${targetIdx}" id="target-entity-${targetIdx}">
+            <a-video src="#ar-video-${targetIdx}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
           </a-entity>
         `;
       });
 
-      container.innerHTML = `
-        <a-scene 
-          id="ar-scene"
-          mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: no;" 
-          color-space="sRGB" 
-          renderer="colorManagement: true, physicallyCorrectLights" 
-          vr-mode-ui="enabled: false" 
-          device-orientation-permission-ui="enabled: false">
-          
-          <a-assets>
-            ${videoAssetsHtml}
-          </a-assets>
+      assetsContainer.innerHTML = assetsHTML;
+      entitiesContainer.innerHTML = entitiesHTML;
 
-          <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      // Update the MindAR attribute on the pre-existing scene and trigger start
+      sceneEl.setAttribute('mindar-image', `imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;`);
 
-          ${targetEntitiesHtml}
-        </a-scene>
-      `;
-
-      const sceneEl = document.querySelector('#ar-scene');
-      sceneEl.addEventListener("arError", (event) => {
-        console.error("MindAR failed to start camera:", event);
-        alert("Could not start camera. Please ensure camera permissions are allowed.");
-      });
-
-      // Attach event listeners and prime video textures after scene mounts
+      // Attach play/pause event listeners to each target after DOM injection
       setTimeout(() => {
         const instruction = document.querySelector('#ui-instruction');
 
-        targetsConfig.forEach((item) => {
-          const targetIdx = item.targetIndex;
-          const targetEntity = document.querySelector(`#target-${targetIdx}`);
-          const videoEl = document.querySelector(`#video-${targetIdx}`);
+        targets.forEach((target) => {
+          const targetIdx = target.targetIndex;
+          const targetEntity = document.querySelector(`#target-entity-${targetIdx}`);
+          const videoEl = document.querySelector(`#ar-video-${targetIdx}`);
 
           if (targetEntity && videoEl) {
-            // Prime video element for WebGL texture memory
+            // Prime video element to initialize WebGL texture buffer
             videoEl.load();
-            videoEl.play().then(() => {
-              videoEl.pause();
-              videoEl.currentTime = 0;
-            }).catch(err => console.log(`Primer play caught:`, err));
 
             targetEntity.addEventListener('targetFound', () => {
-              console.log(`SUCCESS: Target ${targetIdx} recognized for ${clientId}! Playing video.`);
+              console.log(`Target ${targetIdx} found! Playing video.`);
               instruction.innerText = `Playing memory ${targetIdx + 1}...`;
               
-              videoEl.play().then(() => {
-                console.log(`Video ${targetIdx} playing successfully.`);
-              }).catch(e => {
-                console.log(`Playback error on target ${targetIdx}:`, e);
+              videoEl.play().catch(e => {
+                console.log(`Autoplay blocked on target ${targetIdx}, trying muted fallback:`, e);
                 videoEl.muted = true;
                 videoEl.play();
               });
             });
 
             targetEntity.addEventListener('targetLost', () => {
-              console.log(`LOST: Target ${targetIdx} out of view.`);
+              console.log(`Target ${targetIdx} lost. Pausing video.`);
               instruction.innerText = "Point your camera at your Keeper prints";
               videoEl.pause();
               videoEl.currentTime = 0;
             });
           }
         });
-      }, 1500);
+      }, 1000);
     }
   </script>
-
 </body>
 </html>
