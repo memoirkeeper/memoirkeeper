@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Keeper WebAR Multi-Target Scanner</title>
+  <title>Keeper AR Scanner</title>
   
-  <!-- Include A-Frame (v1.5.0) and MindAR A-Frame Library -->
+  <!-- Include A-Frame and MindAR A-Frame Library -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
   
@@ -16,117 +16,143 @@
       background-color: #000;
       font-family: sans-serif;
     }
-    #loading-overlay {
+    #ui-instruction {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 24px;
+      font-size: 14px;
+      z-index: 999;
+      pointer-events: none;
+      text-align: center;
+      max-width: 85vw;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    #start-screen {
       position: fixed;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
-      background: #2D241E;
-      color: #F5F2E9;
+      width: 100vw;
+      height: 100vh;
+      background: #1a1a1a;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
       z-index: 9999;
-      transition: opacity 0.5s ease;
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+      box-sizing: border-box;
     }
-    .spinner {
-      width: 50px;
-      height: 50px;
-      border: 4px solid rgba(245, 242, 233, 0.3);
-      border-top: 4px solid #E5A385;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-bottom: 20px;
+    #start-screen h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+      color: #e5a385; /* Rose gold brand touch */
+      font-family: 'Playfair Display', serif;
     }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    #start-screen p {
+      font-size: 14px;
+      color: #ccc;
+      margin-bottom: 25px;
+      max-width: 320px;
+      line-height: 1.5;
+    }
+    #start-button {
+      background: #e5a385;
+      color: #2d241e;
+      border: none;
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(229, 163, 133, 0.4);
+    }
+    #start-button:active {
+      transform: scale(0.96);
+    }
+    #loading-text {
+      margin-top: 15px;
+      font-size: 12px;
+      color: #888;
     }
   </style>
 </head>
 <body>
 
-  <div id="loading-overlay">
-    <div class="spinner"></div>
-    <div id="loading-text">Loading Multi-Target Experience...</div>
+  <div id="start-screen">
+    <h1>Keeper Memories</h1>
+    <p>Tap below to open your camera and bring your printed photos to life.</p>
+    <button id="start-button" onclick="startScanner()">Open AR Scanner</button>
+    <div id="loading-text">Ready</div>
   </div>
 
+  <div id="ui-instruction" style="display: none;">Point your camera at your Keeper prints</div>
+
+  <div id="scene-container"></div>
+
   <script>
-    // ⚠️ UPDATE THIS to match your exact Firebase Storage bucket name
-    const FIREBASE_BUCKET = "your-project-id.appspot.com";
+    const urlParams = new URLSearchParams(window.location.search);
+    const clientId = urlParams.get('client') || 'default-client';
 
-    async function initializeARScanner() {
-      const loadingText = document.getElementById('loading-text');
-      
-      try {
-        const urlParams = new URLSearchParams(window.location.search);
-        const clientId = urlParams.get('client') || 'test-001';
-        
-        loadingText.innerText = `Loading profile for: ${clientId}...`;
-
-        const configUrl = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${clientId}%2Fconfig.json?alt=media`;
-        const response = await fetch(configUrl);
-        if (!response.ok) {
-          throw new Error(`Could not find config.json for client "${clientId}" (Status: ${response.status})`);
-        }
-        
-        const config = await response.json();
-        console.log("Config loaded successfully:", config);
-
-        const clientFolderPrefix = `https://firebasestorage.googleapis.com/v0/b/${FIREBASE_BUCKET}/o/clients%2F${config.clientId}%2F`;
-        const mindFileUrl = clientFolderPrefix + "targets.mind?alt=media";
-
-        loadingText.innerText = "Initializing Multi-Target Camera...";
-
-        // Build scene dynamically using ALL targets in config.json
-        buildAndInjectMultiScene(mindFileUrl, config.targets, clientFolderPrefix);
-
-      } catch (error) {
-        console.error("Initialization Error:", error);
-        document.getElementById('loading-overlay').innerHTML = `
-          <div style="text-align: center; padding: 20px;">
-            <h3 style="color: #E5A385; margin-bottom: 10px;">Failed to Load Experience</h3>
-            <p style="font-size: 14px; max-width: 300px;">${error.message}</p>
-          </div>
-        `;
-      }
+    const STORAGE_BUCKET = "keeper-ar-storage.firebasestorage.app";
+    
+    function getFirebaseUrl(path) {
+      const encodedPath = encodeURIComponent(path);
+      return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodedPath}?alt=media`;
     }
 
-    function buildAndInjectMultiScene(mindFileUrl, targets, clientFolderPrefix) {
-      // 1. Build assets block dynamically for every video listed in config.json
-      let assetsHTML = '<a-assets>';
-      let entitiesHTML = '';
+    const mindFileUrl = getFirebaseUrl(`clients/${clientId}/targets.mind`);
+    const configUrl = getFirebaseUrl(`clients/${clientId}/config.json`);
 
-      targets.forEach((target, index) => {
-        const videoUrl = clientFolderPrefix + target.videoUrl + "?alt=media";
+    async function startScanner() {
+      const loadingText = document.getElementById('loading-text');
+      loadingText.innerText = "Loading memories...";
+      
+      let totalTargets = 5; // Safe fallback default
+
+      try {
+        // Automatically fetch client configuration from Firebase
+        const response = await fetch(configUrl);
+        if (response.ok) {
+          const config = await response.json();
+          if (config.totalTargets) {
+            totalTargets = config.totalTargets;
+          }
+        }
+      } catch (err) {
+        console.log("Could not load config.json, defaulting to 5 targets.", err);
+      }
+
+      document.getElementById('start-screen').style.display = 'none';
+      document.getElementById('ui-instruction').style.display = 'block';
+
+      const container = document.getElementById('scene-container');
+      
+      let videoAssetsHtml = '';
+      let targetEntitiesHtml = '';
+
+      // Loop dynamically based on what the config file specified (e.g. 1 to 10)
+      for (let i = 0; i < totalTargets; i++) {
+        const videoUrl = getFirebaseUrl(`clients/${clientId}/video-${i}.mp4`);
         
-        // Register each video asset with a unique ID
-        assetsHTML += `
-          <video 
-            id="ar-video-${index}" 
-            src="${videoUrl}" 
-            preload="auto" 
-            response-type="arraybuffer" 
-            crossorigin="anonymous" 
-            playsinline 
-            webkit-playsinline 
-            loop>
-          </video>
+        videoAssetsHtml += `
+          <video id="video-${i}" src="${videoUrl}" preload="auto" response-type="arraybuffer" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
         `;
 
-        // Register each target index (0, 1, 2...) matching your compiled .mind file slots
-        entitiesHTML += `
-          <a-entity mindar-image-target="targetIndex: ${index}" id="target-entity-${index}">
-            <a-video src="#ar-video-${index}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
+        targetEntitiesHtml += `
+          <a-entity mindar-image-target="targetIndex: ${i}" id="target-${i}">
+            <a-video src="#video-${i}" position="0 0 0" width="1" height="1.33" rotation="0 0 0"></a-video>
           </a-entity>
         `;
-      });
-      assetsHTML += '</a-assets>';
+      }
 
-      // 2. Assemble the complete A-Frame scene
-      const sceneHTML = `
+      container.innerHTML = `
         <a-scene 
           mindar-image="imageTargetSrc: ${mindFileUrl}; autoStart: true; uiScanning: yes;" 
           color-space="sRGB" 
@@ -134,46 +160,41 @@
           vr-mode-ui="enabled: false" 
           device-orientation-permission-ui="enabled: false">
           
-          ${assetsHTML}
+          <a-assets>
+            ${videoAssetsHtml}
+          </a-assets>
 
           <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-          ${entitiesHTML}
+          ${targetEntitiesHtml}
         </a-scene>
       `;
 
-      document.body.insertAdjacentHTML('beforeend', sceneHTML);
+      // Attach event listeners for the exact number of targets loaded
+      setTimeout(() => {
+        const instruction = document.querySelector('#ui-instruction');
 
-      // 3. Remove loading screen once loaded
-      const sceneEl = document.querySelector('a-scene');
-      sceneEl.addEventListener('loaded', () => {
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-          overlay.style.opacity = '0';
-          setTimeout(() => overlay.remove(), 500);
+        for (let i = 0; i < totalTargets; i++) {
+          const targetEntity = document.querySelector(`#target-${i}`);
+          const videoEl = document.querySelector(`#video-${i}`);
+
+          if (targetEntity && videoEl) {
+            targetEntity.addEventListener('targetFound', () => {
+              console.log(`SUCCESS: Target ${i} recognized for ${clientId}! Playing video.`);
+              instruction.innerText = `Playing memory ${i + 1}...`;
+              videoEl.play().catch(e => console.log(`Autoplay error on target ${i}:`, e));
+            });
+
+            targetEntity.addEventListener('targetLost', () => {
+              console.log(`LOST: Target ${i} out of view.`);
+              instruction.innerText = "Point your camera at your Keeper prints";
+              videoEl.pause();
+            });
+          }
         }
-      });
-
-      // 4. Attach play/pause listeners to EACH target dynamically
-      targets.forEach((_, index) => {
-        const targetEntity = document.querySelector(`#target-entity-${index}`);
-        const videoEl = document.querySelector(`#ar-video-${index}`);
-
-        if (targetEntity && videoEl) {
-          targetEntity.addEventListener('targetFound', () => {
-            console.log(`Target ${index} found! Playing video.`);
-            videoEl.play().catch(e => console.log(`Autoplay blocked on target ${index}:`, e));
-          });
-
-          targetEntity.addEventListener('targetLost', () => {
-            console.log(`Target ${index} lost. Pausing video.`);
-            videoEl.pause();
-          });
-        }
-      });
+      }, 1500);
     }
-
-    window.addEventListener('DOMContentLoaded', initializeARScanner);
   </script>
+
 </body>
 </html>
